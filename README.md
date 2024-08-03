@@ -16,10 +16,21 @@ npm install zyphr
 ```
 
 ## Usage
+
+### Setup
+
+First, install the necessary dependencies:
+
+```bash
+npm install zyphr
+```
+
+### Example Implementation
+
 Using Zyphr to make HTTP requests with circuit breaker protection and distributed state management is simple. Here’s how to use it:
 
 ```typescript
-const Zyphr = require('zyphr');
+import Zyphr from 'zyphr';
 
 const options = {
   failureThreshold: 5, // After 5 failures, open the circuit
@@ -37,7 +48,7 @@ const httpClient = new Zyphr(options);
 async function makeRequest() {
   try {
     const response = await httpClient.get('https://api.example.com/data');
-    console.log('Request succeeded:', response.body);
+    console.log('Request succeeded:', response.data);
   } catch (error) {
     console.error('Request failed:', error.message);
   }
@@ -79,8 +90,3 @@ Each method returns a promise that resolves with the response or rejects with an
 ### Redis Configuration
 
 Ensure that Redis is properly configured and running to manage the distributed state of the circuit breaker. You can provide Redis connection details in the `redisConfig` option.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
