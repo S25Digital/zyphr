@@ -1,0 +1,23 @@
+{
+  "name": "@s25digital/zyphr",
+  "version": "0.0.1",
+  "description": "Zyphr is a resilient and distributed HTTP request circuit breaker for Node.js, designed to simplify handling HTTP requests while providing robust protection and distributed state management. With Zyphr, you can safeguard your services from cascading failures and ensure smooth operations even under adverse conditions.",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Simranjeet Singh",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.3",
+    "bull": "^4.16.0",
+    "ioredis": "^5.4.1",
+    "opossum": "^8.1.4"
+  },
+  "devDependencies": {
+    "@types/bull": "^3.15.9",
+    "@types/ioredis": "^4.28.10",
+    "@types/node": "^22.2.0"
+  }
+}

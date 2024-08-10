@@ -1,10 +1,10 @@
-import Zyphr from './zyphr';
+import Zyphr, {SCENARIO} from './zyphr';
 
 const options = {
   failureThreshold: 5, // After 5 failures, open the circuit
   successThreshold: 2, // After 2 successes in half-open state, close the circuit
   resetTimeout: 30000, // 30 seconds before trying again
-  scenario: 2, // Scenario 2: Queue requests
+  scenario: SCENARIO.QUEUE_REQUEST , // Scenario 2: Queue requests
   redisConfig: {
     host: 'localhost',
     port: 6379
