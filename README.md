@@ -30,7 +30,7 @@ npm install zyphr
 Using Zyphr to make HTTP requests with circuit breaker protection and distributed state management is simple. Here’s how to use it:
 
 ```typescript
-import Zyphr from 'zyphr';
+import Zyphr from "zyphr";
 
 const options = {
   failureThreshold: 5, // After 5 failures, open the circuit
@@ -38,19 +38,19 @@ const options = {
   resetTimeout: 30000, // 30 seconds before trying again
   scenario: 2, // Scenario 2: Queue requests
   redisConfig: {
-    host: 'localhost',
-    port: 6379
-  }
+    host: "localhost",
+    port: 6379,
+  },
 };
 
 const httpClient = new Zyphr(options);
 
 async function makeRequest() {
   try {
-    const response = await httpClient.get('https://api.example.com/data');
-    console.log('Request succeeded:', response.data);
+    const response = await httpClient.get("https://api.example.com/data");
+    console.log("Request succeeded:", response.data);
   } catch (error) {
-    console.error('Request failed:', error.message);
+    console.error("Request failed:", error.message);
   }
 }
 
@@ -64,6 +64,7 @@ makeRequest();
 Creates a new Zyphr instance.
 
 #### `options`:
+
 - `failureThreshold` (number): Number of failures before opening the circuit.
 - `successThreshold` (number): Number of successes required to close the circuit from the half-open state.
 - `resetTimeout` (number): Time in milliseconds to wait before transitioning from open to half-open state.

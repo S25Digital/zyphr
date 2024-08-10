@@ -102,7 +102,7 @@ class Zyphr {
     method: string,
     url: string,
     data?: any,
-    config?: AxiosRequestConfig
+    config?: AxiosRequestConfig,
   ): Promise<AxiosResponse<any>> {
     const circuitState = await getCircuitState(this._stateKey);
 
@@ -137,7 +137,7 @@ class Zyphr {
     method: string,
     url: string,
     data?: any,
-    config?: AxiosRequestConfig
+    config?: AxiosRequestConfig,
   ): Promise<AxiosResponse<any>> {
     switch (method) {
       case "get":
@@ -188,7 +188,7 @@ class Zyphr {
 
   public async get(
     url: string,
-    config?: AxiosRequestConfig
+    config?: AxiosRequestConfig,
   ): Promise<AxiosResponse<any>> {
     return this._breaker.fire("get", url, null, config);
   }
@@ -196,7 +196,7 @@ class Zyphr {
   public async post(
     url: string,
     data?: any,
-    config?: AxiosRequestConfig
+    config?: AxiosRequestConfig,
   ): Promise<AxiosResponse<any>> {
     return this._breaker.fire("post", url, data, config);
   }
@@ -204,14 +204,14 @@ class Zyphr {
   public async put(
     url: string,
     data?: any,
-    config?: AxiosRequestConfig
+    config?: AxiosRequestConfig,
   ): Promise<AxiosResponse<any>> {
     return this._breaker.fire("put", url, data, config);
   }
 
   public async delete(
     url: string,
-    config?: AxiosRequestConfig
+    config?: AxiosRequestConfig,
   ): Promise<AxiosResponse<any>> {
     return this._breaker.fire("delete", url, null, config);
   }

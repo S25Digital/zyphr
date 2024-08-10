@@ -4,7 +4,14 @@
   "description": "Zyphr is a resilient and distributed HTTP request circuit breaker for Node.js, designed to simplify handling HTTP requests while providing robust protection and distributed state management. With Zyphr, you can safeguard your services from cascading failures and ensure smooth operations even under adverse conditions.",
   "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "lint": "eslint .",
+    "prettier": "prettier --write .",
+    "prebuild": "rimraf dist",
+    "build": "node build.js",
+    "build:types": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "TZ=utc DOTENV_CONFIG_PATH=.env.spec mocha -r esbuild-register -r dotenv/config 'test/**/*.spec.ts'",
+    "test:coverage": "nyc npm run test"
   },
   "keywords": [],
   "author": "Simranjeet Singh",
@@ -16,8 +23,27 @@
     "opossum": "^8.1.4"
   },
   "devDependencies": {
-    "@types/bull": "^3.15.9",
-    "@types/ioredis": "^4.28.10",
-    "@types/node": "^22.2.0"
+    "@types/bull": "^4.10.0",
+    "@types/ioredis": "^5.0.0",
+    "@types/node": "^22.2.0",
+    "@types/chai": "^4.3.17",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/mocha": "^10.0.7",
+    "@typescript-eslint/eslint-plugin": "^8.0.1",
+    "chai": "^5.1.1",
+    "dotenv": "^16.4.5",
+    "esbuild": "^0.23.0",
+    "esbuild-register": "^3.6.0",
+    "eslint": "^9.9.0",
+    "eslint-config-prettier": "^9.1.0",
+    "mocha": "^10.7.3",
+    "nock": "^13.5.4",
+    "nyc": "^17.0.0",
+    "prettier": "^3.3.3",
+    "rimraf": "^6.0.1",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.5.4",
+    "typescript-json-decoder": "^1.0.11"
   }
 }
