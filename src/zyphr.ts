@@ -3,19 +3,19 @@ import CircuitBreaker from "opossum";
 import Redis, { RedisOptions } from "ioredis";
 import Queue from "bull";
 
-const redis = new Redis(); // Configure Redis connection
+export enum SCENARIO {
+  RETURN_ERROR = 1,
+  QUEUE_REQUEST = 2,
+}
 
-// Type definitions for options
 interface ZyphrOptions {
-  failureThreshold: number;
-  successThreshold: number;
   resetTimeout: number;
   scenario: SCENARIO;
   redisConfig?: RedisOptions;
   stateKey?: string;
+  globalTtl?: number; // how long global OPEN state lasts
 }
 
-// Type definitions for queue job data
 interface JobData {
   method: string;
   url: string;
@@ -23,197 +23,104 @@ interface JobData {
   config?: AxiosRequestConfig;
 }
 
-export enum SCENARIO {
-  RETURN_ERROR = 1,
-  QUEUE_REQUEST = 2,
-}
-
-// Function to fetch circuit breaker state from Redis
-async function getCircuitState(key: string): Promise<any> {
-  const state = await redis.get(key);
-  return state
-    ? JSON.parse(state)
-    : {
-        state: "CLOSED",
-        failureCount: 0,
-        successCount: 0,
-        lastFailureTime: null,
-      };
-}
-
-// Function to save circuit breaker state to Redis
-async function setCircuitState(key: string, state: any): Promise<void> {
-  await redis.set(key, JSON.stringify(state));
-}
-
-// Custom circuit breaker class with Redis state management
 class Zyphr {
-  private _options: ZyphrOptions;
-  private _stateKey: string;
-  private _scenario: number;
+  private _breaker: CircuitBreaker<[string, string, any?, AxiosRequestConfig?], AxiosResponse>;
   private _queue: Queue.Queue<JobData>;
-  private _breaker: CircuitBreaker;
+  private _redis: Redis;
+  private _stateKey: string;
+  private _scenario: SCENARIO;
+  private _ttl: number;
 
   constructor(options: ZyphrOptions) {
-    this._options = options;
-    this._stateKey = options.stateKey || "circuit-breaker:zyphr";
+    this._stateKey = options.stateKey || "zyphr:global:circuit";
     this._scenario = options.scenario;
-    this._queue = new Queue("requestQueue", {
-      redis: options.redisConfig,
-    });
-    this._queue.process(async (job) => {
-      const { method, url, data, config } = job.data;
-      return this.request(method, url, data, config);
+    this._ttl = options.globalTtl || 30; // seconds
+    this._redis = new Redis(options.redisConfig);
+    this._queue = new Queue("zyphr-queue", { redis: options.redisConfig });
+
+    const executor = async (
+      method: string,
+      url: string,
+      data?: any,
+      config?: AxiosRequestConfig
+    ) => axios({ method: method as any, url, data, ...config });
+
+    this._breaker = new CircuitBreaker(executor, {
+      timeout: options.resetTimeout,
+      errorThresholdPercentage: 50,
+      resetTimeout: options.resetTimeout,
+      rollingCountTimeout: 10000,
+      rollingCountBuckets: 10,
     });
 
-    this._breaker = new CircuitBreaker(this.fireRequest.bind(this), {
-      timeout: this._options.resetTimeout,
-      errorThresholdPercentage:
-        (this._options.failureThreshold /
-          (this._options.failureThreshold + this._options.successThreshold)) *
-        100,
-      resetTimeout: this._options.resetTimeout,
+    // ----- Global State Broadcasting -----
+    this._breaker.on("open", () => {
+      this._redis.set(this._stateKey, "OPEN", "EX", this._ttl);
     });
 
-    this._breaker.on("open", async () => {
-      const state = await getCircuitState(this._stateKey);
-      state.state = "OPEN";
-      state.lastFailureTime = Date.now();
-      await setCircuitState(this._stateKey, state);
-    });
-
-    this._breaker.on("halfOpen", async () => {
-      const state = await getCircuitState(this._stateKey);
-      state.state = "HALF_OPEN";
-      await setCircuitState(this._stateKey, state);
+    this._breaker.on("halfOpen", () => {
+      this._redis.set(this._stateKey, "HALF_OPEN", "EX", this._ttl);
     });
 
     this._breaker.on("close", async () => {
-      const state = await getCircuitState(this._stateKey);
-      state.state = "CLOSED";
-      state.failureCount = 0;
-      state.successCount = 0;
-      await setCircuitState(this._stateKey, state);
+      await this._redis.set(this._stateKey, "CLOSED", "EX", this._ttl);
       await this.processQueue();
+    });
+
+    // Queue worker always goes through breaker
+    this._queue.process(async (job) => {
+      const { method, url, data, config } = job.data;
+      return this._breaker.fire(method, url, data, config);
     });
   }
 
-  private async fireRequest(
+  // ----- GLOBAL GATE -----
+  private async isGloballyOpen(): Promise<boolean> {
+    const state = await this._redis.get(this._stateKey);
+    return state === "OPEN";
+  }
+
+  private async handleRequest(
     method: string,
     url: string,
     data?: any,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<any>> {
-    const circuitState = await getCircuitState(this._stateKey);
-
-    if (circuitState.state === "OPEN") {
-      if (
-        Date.now() - circuitState.lastFailureTime >
-        this._options.resetTimeout
-      ) {
-        circuitState.state = "HALF_OPEN";
-        await setCircuitState(this._stateKey, circuitState);
-      } else {
-        if (this._scenario === 1) {
-          throw new Error("Circuit is open");
-        } else if (this._scenario === 2) {
-          this._queue.add({ method, url, data, config });
-          throw new Error("Circuit is open. Request has been queued.");
-        }
+    config?: AxiosRequestConfig
+  ) {
+    // 1️⃣ Global Gate Check
+    if (await this.isGloballyOpen()) {
+      if (this._scenario === SCENARIO.RETURN_ERROR) {
+        throw new Error("Circuit is globally open");
       }
+
+      await this._queue.add({ method, url, data, config });
+      throw new Error("Circuit is globally open. Request has been queued.");
     }
 
-    try {
-      const result = await this.request(method, url, data, config);
-      await this.recordSuccess(circuitState);
-      return result;
-    } catch (error) {
-      await this.recordFailure(circuitState);
-      throw error;
-    }
+    // 2️⃣ Local breaker
+    return this._breaker.fire(method, url, data, config);
   }
 
-  private async request(
-    method: string,
-    url: string,
-    data?: any,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<any>> {
-    switch (method) {
-      case "get":
-        return axios.get(url, config);
-      case "post":
-        return axios.post(url, data, config);
-      case "put":
-        return axios.put(url, data, config);
-      case "delete":
-        return axios.delete(url, config);
-      default:
-        throw new Error("Invalid method");
-    }
-  }
-
-  private async recordSuccess(circuitState: any): Promise<void> {
-    circuitState.failureCount = 0;
-    if (circuitState.state === "HALF_OPEN") {
-      circuitState.successCount += 1;
-      if (circuitState.successCount >= this._options.successThreshold) {
-        circuitState.state = "CLOSED";
-        circuitState.successCount = 0;
-        await this.processQueue();
-      }
-    }
-    await setCircuitState(this._stateKey, circuitState);
-  }
-
-  private async recordFailure(circuitState: any): Promise<void> {
-    circuitState.failureCount += 1;
-    circuitState.lastFailureTime = Date.now();
-    if (
-      circuitState.state === "HALF_OPEN" ||
-      (circuitState.state === "CLOSED" &&
-        circuitState.failureCount > this._options.failureThreshold)
-    ) {
-      circuitState.state = "OPEN";
-    }
-    await setCircuitState(this._stateKey, circuitState);
-  }
-
-  private async processQueue(): Promise<void> {
+  private async processQueue() {
     const jobs = await this._queue.getWaiting();
     for (const job of jobs) {
       await job.promote();
     }
   }
 
-  public async get(
-    url: string,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<any>> {
-    return this._breaker.fire("get", url, null, config);
+  public get(url: string, config?: AxiosRequestConfig) {
+    return this.handleRequest("get", url, undefined, config);
   }
 
-  public async post(
-    url: string,
-    data?: any,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<any>> {
-    return this._breaker.fire("post", url, data, config);
+  public post(url: string, data?: any, config?: AxiosRequestConfig) {
+    return this.handleRequest("post", url, data, config);
   }
 
-  public async put(
-    url: string,
-    data?: any,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<any>> {
-    return this._breaker.fire("put", url, data, config);
+  public put(url: string, data?: any, config?: AxiosRequestConfig) {
+    return this.handleRequest("put", url, data, config);
   }
 
-  public async delete(
-    url: string,
-    config?: AxiosRequestConfig,
-  ): Promise<AxiosResponse<any>> {
-    return this._breaker.fire("delete", url, null, config);
+  public delete(url: string, config?: AxiosRequestConfig) {
+    return this.handleRequest("delete", url, undefined, config);
   }
 }
 
