@@ -23,7 +23,7 @@ interface JobData {
   config?: AxiosRequestConfig;
 }
 
-class Zyphr {
+export class Zyphr {
   private _breaker: CircuitBreaker<[string, string, any?, AxiosRequestConfig?], AxiosResponse>;
   private _queue: Queue.Queue<JobData>;
   private _redis: Redis;
@@ -123,5 +123,3 @@ class Zyphr {
     return this.handleRequest("delete", url, undefined, config);
   }
 }
-
-export default Zyphr;

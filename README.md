@@ -1,13 +1,20 @@
 # Zyphr
 
-Zyphr is a resilient and distributed HTTP request circuit breaker for Node.js, designed to simplify handling HTTP requests while providing robust protection and distributed state management. With Zyphr, you can safeguard your services from cascading failures and ensure smooth operations even under adverse conditions.
+Zyphr is a resilient and distributed HTTP request circuit breaker for Node.js. It simplifies outbound HTTP calls while protecting your system from cascading failures using local circuit breaking and a cluster‑wide global failure gate.
+
+Zyphr is designed for **resilience**, not delayed response delivery.
+
+---
 
 ## Features
 
-- **Resilient Circuit Breaking**: Automatically manages the state of HTTP requests to prevent repeated failures from overwhelming your system.
-- **Distributed State Management**: Leverages Redis to share circuit breaker state across multiple instances of your service.
-- **Customizable Scenarios**: Choose between returning an immediate error or queuing requests when the circuit is open, to be processed when the circuit closes.
-- **Simple HTTP Methods**: Easy-to-use HTTP methods that abstract away the circuit breaker logic, allowing you to focus on your application.
+- **Resilient Circuit Breaking** – Prevents repeated failing requests from overwhelming downstream systems.
+- **Distributed Global Gate** – Uses Redis so all service instances stop traffic when one detects failure.
+- **Background Replay (Optional)** – Failed requests can be retried automatically once recovery occurs.
+- **Simple HTTP Methods** – Clean API wrapping Axios.
+- **Scenario-Based Control** – Choose fail-fast or queue-and-retry behavior.
+
+---
 
 ## Installation
 
@@ -15,79 +22,139 @@ Zyphr is a resilient and distributed HTTP request circuit breaker for Node.js, d
 npm install zyphr
 ```
 
+---
+
 ## Usage
 
-### Setup
+```ts
+import Zyphr, { SCENARIO } from "zyphr";
 
-First, install the necessary dependencies:
+const zyphr = new Zyphr({
+  resetTimeout: 5000,
+  scenario: SCENARIO.QUEUE_REQUEST,
+  redisConfig: { host: "localhost", port: 6379 }
+});
 
-```bash
-npm install zyphr
+await zyphr.post("/orders", { id: 123 });
 ```
 
-### Example Implementation
+---
 
-Using Zyphr to make HTTP requests with circuit breaker protection and distributed state management is simple. Here’s how to use it:
+# API Reference
 
-```typescript
-import Zyphr from "zyphr";
+Zyphr provides:
 
-const options = {
-  failureThreshold: 5, // After 5 failures, open the circuit
-  successThreshold: 2, // After 2 successes in half-open state, close the circuit
-  resetTimeout: 30000, // 30 seconds before trying again
-  scenario: 2, // Scenario 2: Queue requests
-  redisConfig: {
-    host: "localhost",
-    port: 6379,
-  },
-};
+- Local circuit breaking
+- Cluster-wide failure gating
+- Optional background replay
 
-const httpClient = new Zyphr(options);
+It is **not** a job processor or delayed response system.
 
-async function makeRequest() {
-  try {
-    const response = await httpClient.get("https://api.example.com/data");
-    console.log("Request succeeded:", response.data);
-  } catch (error) {
-    console.error("Request failed:", error.message);
-  }
-}
+---
 
-makeRequest();
-```
-
-## API
-
-### `Zyphr(options)`
+## `new Zyphr(options)`
 
 Creates a new Zyphr instance.
 
-#### `options`:
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `resetTimeout` | `number` | ✅ | Time (ms) before breaker attempts recovery |
+| `scenario` | `SCENARIO` | ✅ | Behavior when circuit is open |
+| `redisConfig` | `RedisOptions` | ❌ | Redis connection for global gate & queue |
+| `stateKey` | `string` | ❌ | Redis key used for global circuit state |
+| `globalTtl` | `number` | ❌ | TTL (seconds) for global open state |
 
-- `failureThreshold` (number): Number of failures before opening the circuit.
-- `successThreshold` (number): Number of successes required to close the circuit from the half-open state.
-- `resetTimeout` (number): Time in milliseconds to wait before transitioning from open to half-open state.
-- `scenario` (number): Scenario 1 (immediate error) or Scenario 2 (queue requests).
-- `redisConfig` (object): Redis connection configuration.
+---
 
-### HTTP Methods
+## `SCENARIO`
 
-Zyphr provides simple HTTP methods that abstract away the circuit breaker logic:
+```ts
+enum SCENARIO {
+  RETURN_ERROR = 1,
+  QUEUE_REQUEST = 2
+}
+```
 
-- `get(url, options)`: Makes a GET request.
-- `post(url, body, options)`: Makes a POST request.
-- `put(url, body, options)`: Makes a PUT request.
-- `delete(url, options)`: Makes a DELETE request.
+| Scenario | Behavior |
+|----------|----------|
+| `RETURN_ERROR` | Immediately throws error when circuit is open |
+| `QUEUE_REQUEST` | Queues request for background retry and throws error |
 
-Each method returns a promise that resolves with the response or rejects with an error.
+---
 
-### Scenarios
+## HTTP Methods
 
-1. **Immediate Error (Scenario 1)**: When the circuit is open, Zyphr immediately returns an error indicating that the circuit is open. This allows the consumer to handle the failure accordingly.
+All methods return a **Promise<AxiosResponse>**
 
-2. **Queue Requests (Scenario 2)**: When the circuit is open, requests are added to a queue and an error is returned indicating that the request has been queued. Once the circuit transitions to the closed state, the queued requests are processed.
+- `get(url, config?)`
+- `post(url, data?, config?)`
+- `put(url, data?, config?)`
+- `delete(url, config?)`
 
-### Redis Configuration
+---
 
-Ensure that Redis is properly configured and running to manage the distributed state of the circuit breaker. You can provide Redis connection details in the `redisConfig` option.
+## Circuit Behavior
+
+| Layer | Purpose |
+|------|---------|
+| Local Circuit Breaker | Detects failures in current container |
+| Global Gate (Redis) | Stops traffic across all containers |
+
+When one instance trips, all instances stop sending traffic.
+
+---
+
+## Queue Behavior (Important)
+
+If `scenario = QUEUE_REQUEST`:
+
+- Request is stored for background retry
+- Client does **not** receive a later response
+- Replay happens only after recovery
+
+This queue supports:
+
+- Idempotent updates
+- Webhook retries
+- State reconciliation
+- Eventual consistency
+
+It is **not** for real-time user flows.
+
+---
+
+## Errors
+
+| Condition | Error |
+|-----------|------|
+| Circuit open (Scenario 1) | `Error: Circuit is globally open` |
+| Circuit open (Scenario 2) | `Error: Circuit is globally open. Request has been queued.` |
+
+---
+
+## Guarantees
+
+| Guarantee | Status |
+|-----------|--------|
+| Prevents cascading failures | ✅ |
+| Cluster-wide traffic stop | ✅ |
+| Background retry | ✅ |
+| Delayed client response | ❌ |
+| Exactly-once execution | ❌ |
+
+---
+
+## Redis Requirement
+
+Redis is required for:
+
+- Global circuit state
+- Queue coordination
+
+All Zyphr instances should share the same Redis.
+
+---
+
+## License
+
+MIT
